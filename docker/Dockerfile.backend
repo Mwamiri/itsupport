@@ -1,0 +1,47 @@
+FROM php:8.2-fpm-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    git curl libpng-dev libpq-dev libzip-dev zip unzip \
+    oniguruma-dev icu-dev nginx supervisor
+
+# Install PHP extensions
+RUN docker-php-ext-install \
+    pdo pdo_pgsql pgsql \
+    mbstring exif pcntl bcmath gd zip intl opcache
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www
+
+# Copy composer files first (layer caching)
+COPY backend/composer.json backend/composer.lock* ./
+
+# Install PHP dependencies
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+
+# Copy application
+COPY backend/ .
+
+# Generate optimised autoloader
+RUN composer dump-autoload --optimize
+
+# Set permissions
+RUN chown -R www-data:www-data /var/www \
+    && chmod -R 755 /var/www/storage \
+    && chmod -R 755 /var/www/bootstrap/cache
+
+# Nginx config
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+
+# Supervisor config
+COPY docker/supervisord.conf /etc/supervisord.conf
+
+# Startup script
+COPY docker/start.sh /start.sh
+RUN chmod +x /start.sh
+
+EXPOSE 80
+
+CMD ["/start.sh"]
